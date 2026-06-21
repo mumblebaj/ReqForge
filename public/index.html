@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ReqForge</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="request-pane" aria-label="Request builder">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">ReqForge</p>
+            <h1>Request Builder</h1>
+          </div>
+          <button class="ghost-button" id="clearButton" type="button" title="Clear request">Clear</button>
+        </header>
+
+        <form id="requestForm">
+          <div class="request-line">
+            <label class="sr-only" for="method">Method</label>
+            <select id="method" name="method">
+              <option>GET</option>
+              <option>POST</option>
+              <option>PUT</option>
+              <option>PATCH</option>
+              <option>DELETE</option>
+            </select>
+
+            <label class="sr-only" for="url">URL</label>
+            <input id="url" name="url" type="url" placeholder="https://api.example.com/resource" required>
+
+            <button id="sendButton" class="send-button" type="submit">Send</button>
+          </div>
+
+          <nav class="tabs" aria-label="Request options">
+            <button class="tab active" data-tab="params" type="button">Params</button>
+            <button class="tab" data-tab="headers" type="button">Headers</button>
+            <button class="tab" data-tab="auth" type="button">Authorization</button>
+            <button class="tab" data-tab="body" type="button">Body</button>
+          </nav>
+
+          <section class="tab-panel active" id="paramsPanel">
+            <div class="panel-heading">
+              <h2>Query Params</h2>
+              <button class="icon-button" data-add-row="paramsTable" type="button" title="Add query param">+</button>
+            </div>
+            <div class="key-value-table" id="paramsTable"></div>
+          </section>
+
+          <section class="tab-panel" id="headersPanel">
+            <div class="panel-heading">
+              <h2>Headers</h2>
+              <button class="icon-button" data-add-row="headersTable" type="button" title="Add header">+</button>
+            </div>
+            <div class="key-value-table" id="headersTable"></div>
+          </section>
+
+          <section class="tab-panel" id="authPanel">
+            <div class="auth-grid">
+              <label>
+                Type
+                <select id="authType">
+                  <option value="none">No Auth</option>
+                  <option value="bearer">Bearer Token</option>
+                  <option value="basic">Basic Auth</option>
+                  <option value="apiKey">API Key</option>
+                  <option value="oauth2">OAuth 2.0 Token</option>
+                  <option value="jwt">JWT Bearer</option>
+                </select>
+              </label>
+
+              <div class="auth-fields active" data-auth-fields="none">
+                <p class="muted">No authorization will be added.</p>
+              </div>
+
+              <div class="auth-fields" data-auth-fields="bearer oauth2 jwt">
+                <label>
+                  Token
+                  <input id="tokenValue" type="password" autocomplete="off" placeholder="Token">
+                </label>
+              </div>
+
+              <div class="auth-fields" data-auth-fields="basic">
+                <label>
+                  Username
+                  <input id="basicUsername" type="text" autocomplete="off" placeholder="Username">
+                </label>
+                <label>
+                  Password
+                  <input id="basicPassword" type="password" autocomplete="off" placeholder="Password">
+                </label>
+              </div>
+
+              <div class="auth-fields" data-auth-fields="apiKey">
+                <label>
+                  Key
+                  <input id="apiKeyName" type="text" placeholder="x-api-key">
+                </label>
+                <label>
+                  Value
+                  <input id="apiKeyValue" type="password" autocomplete="off" placeholder="Value">
+                </label>
+                <label>
+                  Add To
+                  <select id="apiKeyLocation">
+                    <option value="header">Header</option>
+                    <option value="query">Query Param</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          </section>
+
+          <section class="tab-panel" id="bodyPanel">
+            <div class="body-toolbar">
+              <label>
+                Payload Type
+                <select id="bodyType">
+                  <option value="json">JSON</option>
+                  <option value="text">Raw Text</option>
+                  <option value="none">None</option>
+                </select>
+              </label>
+              <button class="ghost-button" id="formatJsonButton" type="button">Format JSON</button>
+            </div>
+            <textarea id="bodyEditor" spellcheck="false" placeholder="{&#10;  &quot;name&quot;: &quot;Ada&quot;&#10;}"></textarea>
+          </section>
+        </form>
+      </section>
+
+      <aside class="response-pane" aria-label="Response">
+        <header class="response-header">
+          <div>
+            <p class="eyebrow">Response</p>
+            <h2 id="responseTitle">Not sent</h2>
+          </div>
+          <div class="status-strip">
+            <span id="statusCode">--</span>
+            <span id="elapsedTime">-- ms</span>
+          </div>
+        </header>
+
+        <nav class="tabs response-tabs" aria-label="Response views">
+          <button class="tab active" data-response-tab="responseBody" type="button">Body</button>
+          <button class="tab" data-response-tab="responseHeaders" type="button">Headers</button>
+        </nav>
+
+        <pre class="response-output active" id="responseBody"></pre>
+        <pre class="response-output" id="responseHeaders"></pre>
+      </aside>
+    </main>
+
+    <template id="rowTemplate">
+      <div class="key-value-row">
+        <input data-field="key" type="text" placeholder="Key">
+        <input data-field="value" type="text" placeholder="Value">
+        <button class="icon-button danger" type="button" title="Remove row">x</button>
+      </div>
+    </template>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
