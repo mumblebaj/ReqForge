@@ -23,6 +23,18 @@ function sendJson(res, statusCode, payload) {
   res.end(body);
 }
 
+function sendProxyError(res, statusCode, statusText, message, elapsedMs = 0) {
+  sendJson(res, statusCode, {
+    ok: false,
+    status: statusCode,
+    statusText,
+    headers: {},
+    body: "",
+    error: message,
+    elapsedMs
+  });
+}
+
 function readJsonBody(req) {
   return new Promise((resolve, reject) => {
     let raw = "";
@@ -79,7 +91,7 @@ async function proxyRequest(req, res) {
   try {
     payload = await readJsonBody(req);
   } catch (error) {
-    sendJson(res, 400, { error: error.message });
+    sendProxyError(res, 400, "Bad Request", error.message);
     return;
   }
 
@@ -87,7 +99,7 @@ async function proxyRequest(req, res) {
   const allowedMethods = new Set(["GET", "POST", "PUT", "PATCH", "DELETE"]);
 
   if (!allowedMethods.has(method)) {
-    sendJson(res, 400, { error: "Unsupported HTTP method." });
+    sendProxyError(res, 400, "Bad Request", "Unsupported HTTP method.");
     return;
   }
 
@@ -95,12 +107,12 @@ async function proxyRequest(req, res) {
   try {
     targetUrl = new URL(payload.url);
   } catch {
-    sendJson(res, 400, { error: "Enter a valid absolute URL." });
+    sendProxyError(res, 400, "Bad Request", "Enter a valid absolute URL.");
     return;
   }
 
   if (!["http:", "https:"].includes(targetUrl.protocol)) {
-    sendJson(res, 400, { error: "Only HTTP and HTTPS URLs are supported." });
+    sendProxyError(res, 400, "Bad Request", "Only HTTP and HTTPS URLs are supported.");
     return;
   }
 
@@ -141,10 +153,13 @@ async function proxyRequest(req, res) {
       elapsedMs: Math.round(performance.now() - startedAt)
     });
   } catch (error) {
-    sendJson(res, 502, {
-      error: error.name === "AbortError" ? "Request timed out." : error.message,
-      elapsedMs: Math.round(performance.now() - startedAt)
-    });
+    sendProxyError(
+      res,
+      502,
+      "Bad Gateway",
+      error.name === "AbortError" ? "Request timed out." : error.message,
+      Math.round(performance.now() - startedAt)
+    );
   } finally {
     clearTimeout(timeout);
   }

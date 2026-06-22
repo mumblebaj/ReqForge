@@ -155,12 +155,28 @@ function setPending(isPending) {
   sendButton.textContent = isPending ? "Sending" : "Send";
 }
 
-function showError(message) {
+function formatStatus(result) {
+  if (!result || !result.status) {
+    return "Error";
+  }
+
+  return [result.status, result.statusText].filter(Boolean).join(" ");
+}
+
+function renderResponseResult(result) {
+  responseTitle.textContent = result.ok ? "Completed" : `HTTP ${formatStatus(result)}`;
+  statusCode.textContent = formatStatus(result);
+  elapsedTime.textContent = `${result.elapsedMs || 0} ms`;
+  responseBody.textContent = prettifyBody(result.body);
+  responseHeaders.textContent = JSON.stringify(result.headers || {}, null, 2);
+}
+
+function showError(message, result = {}) {
   responseTitle.textContent = "Request error";
-  statusCode.textContent = "Error";
-  elapsedTime.textContent = "-- ms";
+  statusCode.textContent = formatStatus(result);
+  elapsedTime.textContent = result.elapsedMs !== undefined ? `${result.elapsedMs} ms` : "-- ms";
   responseBody.textContent = message;
-  responseHeaders.textContent = "";
+  responseHeaders.textContent = result.headers ? JSON.stringify(result.headers, null, 2) : "";
   setResponseTab("responseBody");
 }
 
@@ -193,16 +209,11 @@ async function sendRequest(event) {
 
     const result = await response.json();
     if (!response.ok || result.error) {
-      showError(result.error || "The request failed.");
-      elapsedTime.textContent = `${result.elapsedMs || 0} ms`;
+      showError(result.error || result.body || "The request failed.", result);
       return;
     }
 
-    responseTitle.textContent = result.ok ? "Completed" : "Completed with error";
-    statusCode.textContent = `${result.status} ${result.statusText}`;
-    elapsedTime.textContent = `${result.elapsedMs} ms`;
-    responseBody.textContent = prettifyBody(result.body);
-    responseHeaders.textContent = JSON.stringify(result.headers, null, 2);
+    renderResponseResult(result);
   } catch (error) {
     showError(error.message);
   } finally {

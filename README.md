@@ -173,6 +173,8 @@ After a request completes, ReqForge displays:
 - response body
 - response headers
 
+HTTP error responses from the target API, such as `400 Bad Request` or `401 Unauthorized`, are displayed as normal API responses with their original status code, response body, and response headers. Network or proxy-level failures are shown separately as request errors.
+
 If the response body contains JSON, it is automatically formatted for readability.
 
 ## Local Proxy Endpoint
