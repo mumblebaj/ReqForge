@@ -16,6 +16,7 @@ ReqForge is a lightweight JavaScript API request builder for sending HTTP reques
 ## Requirements
 
 - Node.js 18 or newer
+- Docker Desktop or another Docker runtime, when running ReqForge in a container
 
 ReqForge uses only built-in Node.js APIs and does not require installing npm dependencies.
 
@@ -38,6 +39,40 @@ By default, the server listens on port `3000`. To use a different port:
 ```powershell
 $env:PORT=4000; npm start
 ```
+
+## Docker
+
+Build the container image:
+
+```powershell
+docker build -t reqforge .
+```
+
+Run ReqForge on `http://localhost:3000`:
+
+```powershell
+docker run --rm -p 3000:3000 --name reqforge reqforge
+```
+
+To expose the app on a different host port, map that port to the container's port `3000`:
+
+```powershell
+docker run --rm -p 4000:3000 --name reqforge reqforge
+```
+
+Then open:
+
+```text
+http://localhost:4000
+```
+
+Stop the running container:
+
+```powershell
+docker stop reqforge
+```
+
+When calling APIs that are running on your host machine, use `host.docker.internal` instead of `localhost`. Inside a container, `localhost` refers to the container itself.
 
 ## Request Builder
 
@@ -218,12 +253,13 @@ Requests time out after 30 seconds by default. The proxy only supports `http://`
 
 ```text
 .
-├── package.json
-├── server.js
-└── public
-    ├── app.js
-    ├── index.html
-    └── styles.css
++-- Dockerfile
++-- package.json
++-- server.js
++-- public
+    +-- app.js
+    +-- index.html
+    +-- styles.css
 ```
 
 ## Development
