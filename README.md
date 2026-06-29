@@ -18,11 +18,18 @@ ReqForge is a lightweight JavaScript API request builder for sending HTTP reques
 ## Requirements
 
 - Node.js 18 or newer
+- pac-resolver v9.0.1
 - Docker Desktop or another Docker runtime, when running ReqForge in a container
 
 ReqForge uses only built-in Node.js APIs and does not require installing npm dependencies.
 
 ## Getting Started
+
+Run:
+```powershell
+npm install
+```
+to install the pac-resolver dependency
 
 Start the local server:
 
