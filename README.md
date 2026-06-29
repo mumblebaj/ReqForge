@@ -74,6 +74,16 @@ docker stop reqforge
 
 When calling APIs that are running on your host machine, use `host.docker.internal` instead of `localhost`. Inside a container, `localhost` refers to the container itself.
 
+To run the container with a corporate proxy, pass proxy environment variables through to Node:
+
+```powershell
+docker run --rm -p 3000:3000 --name reqforge `
+  -e HTTP_PROXY=$env:HTTP_PROXY `
+  -e HTTPS_PROXY=$env:HTTPS_PROXY `
+  -e NO_PROXY=$env:NO_PROXY `
+  reqforge
+```
+
 ## Request Builder
 
 ### Method
@@ -260,6 +270,35 @@ The proxy returns:
 ```
 
 Requests time out after 30 seconds by default. The proxy only supports `http://` and `https://` targets.
+
+## Corporate Proxy Support
+
+ReqForge honors these environment variables from the Node.js server process:
+
+```text
+HTTP_PROXY
+HTTPS_PROXY
+NO_PROXY
+```
+
+Use `HTTP_PROXY` for plain HTTP targets and `HTTPS_PROXY` for HTTPS targets. `NO_PROXY` accepts comma-separated hosts or domains that should bypass the proxy, such as:
+
+```text
+localhost,127.0.0.1,.internal.example.com
+```
+
+ReqForge currently supports HTTP proxy URLs, including HTTPS targets through an HTTP `CONNECT` tunnel:
+
+```text
+HTTP_PROXY=http://proxy.example.com:8080
+HTTPS_PROXY=http://proxy.example.com:8080
+```
+
+Proxy credentials can be included in the proxy URL when your environment requires them:
+
+```text
+HTTPS_PROXY=http://username:password@proxy.example.com:8080
+```
 
 ## Project Structure
 

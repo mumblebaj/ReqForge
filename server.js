@@ -1,6 +1,8 @@
 const http = require("http");
+const https = require("https");
 const fs = require("fs");
 const path = require("path");
+const tls = require("tls");
 
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -77,6 +79,296 @@ function getErrorDetails(error) {
   details.push("ReqForge did not receive an HTTP response from the target API.");
 
   return details;
+}
+
+function getHeaderValue(headers, headerName) {
+  const match = Object.keys(headers).find((key) => key.toLowerCase() === headerName.toLowerCase());
+  return match ? headers[match] : undefined;
+}
+
+function setHeaderValue(headers, headerName, value) {
+  const match = Object.keys(headers).find((key) => key.toLowerCase() === headerName.toLowerCase());
+  headers[match || headerName] = value;
+}
+
+function applyBodyHeaders(headers, body) {
+  if (body === undefined || body === null || String(body).length === 0) {
+    return;
+  }
+
+  if (!hasHeader(headers, "Content-Length") && !hasHeader(headers, "Transfer-Encoding")) {
+    setHeaderValue(headers, "Content-Length", Buffer.byteLength(String(body)));
+  }
+}
+
+function getEnvValue(names) {
+  for (const name of names) {
+    if (process.env[name]) {
+      return process.env[name];
+    }
+  }
+
+  return "";
+}
+
+function getNoProxyRules() {
+  return getEnvValue(["NO_PROXY", "no_proxy"])
+    .split(",")
+    .map((rule) => rule.trim())
+    .filter(Boolean);
+}
+
+function hostnameMatchesNoProxyRule(hostname, rule) {
+  const normalizedHost = hostname.toLowerCase();
+  const normalizedRule = rule.toLowerCase();
+  const hostRule = normalizedRule.split(":")[0];
+
+  if (normalizedRule === "*") {
+    return true;
+  }
+
+  if (hostRule.startsWith(".")) {
+    return normalizedHost === hostRule.slice(1) || normalizedHost.endsWith(hostRule);
+  }
+
+  return normalizedHost === hostRule || normalizedHost.endsWith(`.${hostRule}`);
+}
+
+function isNoProxyMatch(targetUrl) {
+  const hostname = targetUrl.hostname;
+  const port = targetUrl.port || (targetUrl.protocol === "https:" ? "443" : "80");
+
+  return getNoProxyRules().some((rule) => {
+    const [ruleHost, rulePort] = rule.split(":");
+    if (rulePort && rulePort !== port) {
+      return false;
+    }
+
+    return hostnameMatchesNoProxyRule(hostname, ruleHost || rule);
+  });
+}
+
+function getProxyUrl(targetUrl) {
+  if (isNoProxyMatch(targetUrl)) {
+    return null;
+  }
+
+  const proxyValue =
+    targetUrl.protocol === "https:"
+      ? getEnvValue(["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"])
+      : getEnvValue(["HTTP_PROXY", "http_proxy"]);
+
+  if (!proxyValue) {
+    return null;
+  }
+
+  try {
+    return new URL(proxyValue);
+  } catch {
+    const error = new Error(`Invalid proxy URL in environment: ${proxyValue}`);
+    error.code = "EINVAL_PROXY";
+    throw error;
+  }
+}
+
+function getProxyDescription(proxyUrl) {
+  if (!proxyUrl) {
+    return "direct connection";
+  }
+
+  return `${proxyUrl.protocol}//${proxyUrl.hostname}:${proxyUrl.port || (proxyUrl.protocol === "https:" ? "443" : "80")}`;
+}
+
+function getProxyAuthorization(proxyUrl) {
+  if (!proxyUrl.username && !proxyUrl.password) {
+    return "";
+  }
+
+  return `Basic ${Buffer.from(`${decodeURIComponent(proxyUrl.username)}:${decodeURIComponent(proxyUrl.password)}`).toString("base64")}`;
+}
+
+function collectResponse(res) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+
+    res.on("data", (chunk) => chunks.push(chunk));
+    res.on("end", () => {
+      resolve({
+        ok: res.statusCode >= 200 && res.statusCode < 300,
+        status: res.statusCode,
+        statusText: res.statusMessage,
+        headers: res.headers,
+        body: Buffer.concat(chunks).toString("utf8")
+      });
+    });
+    res.on("error", reject);
+  });
+}
+
+function createTimeoutError() {
+  const error = new Error("Request timed out.");
+  error.name = "AbortError";
+  return error;
+}
+
+function requestDirect(targetUrl, options, body, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const transport = targetUrl.protocol === "https:" ? https : http;
+    const req = transport.request(
+      {
+        protocol: targetUrl.protocol,
+        hostname: targetUrl.hostname,
+        port: targetUrl.port || (targetUrl.protocol === "https:" ? 443 : 80),
+        method: options.method,
+        path: `${targetUrl.pathname}${targetUrl.search}`,
+        headers: options.headers,
+        timeout: timeoutMs
+      },
+      async (res) => {
+        try {
+          resolve(await collectResponse(res));
+        } catch (error) {
+          reject(error);
+        }
+      }
+    );
+
+    req.on("timeout", () => req.destroy(createTimeoutError()));
+    req.on("error", reject);
+    req.end(body);
+  });
+}
+
+function requestHttpThroughProxy(targetUrl, proxyUrl, options, body, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const headers = { ...options.headers, Host: targetUrl.host };
+    const proxyAuthorization = getProxyAuthorization(proxyUrl);
+
+    if (proxyAuthorization) {
+      headers["Proxy-Authorization"] = proxyAuthorization;
+    }
+
+    const req = http.request(
+      {
+        hostname: proxyUrl.hostname,
+        port: proxyUrl.port || 80,
+        method: options.method,
+        path: targetUrl.href,
+        headers,
+        timeout: timeoutMs
+      },
+      async (res) => {
+        try {
+          resolve(await collectResponse(res));
+        } catch (error) {
+          reject(error);
+        }
+      }
+    );
+
+    req.on("timeout", () => req.destroy(createTimeoutError()));
+    req.on("error", reject);
+    req.end(body);
+  });
+}
+
+function requestHttpsThroughProxy(targetUrl, proxyUrl, options, body, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const connectHeaders = {
+      Host: targetUrl.host
+    };
+    const proxyAuthorization = getProxyAuthorization(proxyUrl);
+
+    if (proxyAuthorization) {
+      connectHeaders["Proxy-Authorization"] = proxyAuthorization;
+    }
+
+    const connectReq = http.request({
+      hostname: proxyUrl.hostname,
+      port: proxyUrl.port || 80,
+      method: "CONNECT",
+      path: targetUrl.host,
+      headers: connectHeaders,
+      timeout: timeoutMs
+    });
+
+    connectReq.on("connect", (res, socket) => {
+      if (res.statusCode !== 200) {
+        socket.destroy();
+        const error = new Error(`Proxy CONNECT failed with ${res.statusCode} ${res.statusMessage}`);
+        error.code = "EPROXYCONNECT";
+        reject(error);
+        return;
+      }
+
+      const secureSocket = tls.connect({
+        socket,
+        servername: targetUrl.hostname
+      });
+
+      const req = https.request(
+        {
+          hostname: targetUrl.hostname,
+          port: targetUrl.port || 443,
+          method: options.method,
+          path: `${targetUrl.pathname}${targetUrl.search}`,
+          headers: options.headers,
+          createConnection: () => secureSocket,
+          timeout: timeoutMs
+        },
+        async (targetRes) => {
+          try {
+            resolve(await collectResponse(targetRes));
+          } catch (error) {
+            reject(error);
+          }
+        }
+      );
+
+      req.on("timeout", () => req.destroy(createTimeoutError()));
+      req.on("error", reject);
+      req.end(body);
+    });
+
+    connectReq.on("timeout", () => connectReq.destroy(createTimeoutError()));
+    connectReq.on("error", reject);
+    connectReq.end();
+  });
+}
+
+async function sendHttpRequest(targetUrl, options, body, timeoutMs, redirectCount = 0) {
+  const proxyUrl = getProxyUrl(targetUrl);
+
+  if (proxyUrl && proxyUrl.protocol !== "http:") {
+    const error = new Error("Only HTTP proxy URLs are currently supported.");
+    error.code = "EUNSUPPORTED_PROXY";
+    throw error;
+  }
+
+  const response = proxyUrl
+    ? targetUrl.protocol === "https:"
+      ? await requestHttpsThroughProxy(targetUrl, proxyUrl, options, body, timeoutMs)
+      : await requestHttpThroughProxy(targetUrl, proxyUrl, options, body, timeoutMs)
+    : await requestDirect(targetUrl, options, body, timeoutMs);
+
+  const redirectLocation = response.headers.location;
+  if ([301, 302, 303, 307, 308].includes(response.status) && redirectLocation && redirectCount < 5) {
+    const redirectUrl = new URL(redirectLocation, targetUrl);
+    const redirectOptions = { ...options, headers: { ...options.headers } };
+    let redirectBody = body;
+
+    if (response.status === 303 || ((response.status === 301 || response.status === 302) && options.method === "POST")) {
+      redirectOptions.method = "GET";
+      redirectBody = undefined;
+      delete redirectOptions.headers["Content-Length"];
+      delete redirectOptions.headers["content-length"];
+    }
+
+    return sendHttpRequest(redirectUrl, redirectOptions, redirectBody, timeoutMs, redirectCount + 1);
+  }
+
+  response.transport = getProxyDescription(proxyUrl);
+  return response;
 }
 
 function readJsonBody(req) {
@@ -169,32 +461,26 @@ async function proxyRequest(req, res) {
   applyDefaultHeaders(headers);
 
   const timeoutMs = Math.min(Number(payload.timeoutMs || 30000), 120000);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const startedAt = performance.now();
 
   try {
     const hasBody = payload.body !== undefined && payload.body !== null && String(payload.body).length > 0;
-    const response = await fetch(targetUrl, {
-      method,
-      headers,
-      body: ["GET"].includes(method) || !hasBody ? undefined : String(payload.body),
-      signal: controller.signal,
-      redirect: "follow"
-    });
+    const body = ["GET"].includes(method) || !hasBody ? undefined : String(payload.body);
 
-    const responseBody = await response.text();
-    const responseHeaders = {};
-    response.headers.forEach((value, key) => {
-      responseHeaders[key] = value;
-    });
+    applyBodyHeaders(headers, body);
+
+    const response = await sendHttpRequest(targetUrl, {
+      method,
+      headers
+    }, body, timeoutMs);
 
     sendJson(res, 200, {
       ok: response.ok,
       status: response.status,
       statusText: response.statusText,
-      headers: responseHeaders,
-      body: responseBody,
+      headers: response.headers,
+      body: response.body,
+      transport: response.transport,
       elapsedMs: Math.round(performance.now() - startedAt)
     });
   } catch (error) {
@@ -206,8 +492,6 @@ async function proxyRequest(req, res) {
       Math.round(performance.now() - startedAt),
       getErrorDetails(error)
     );
-  } finally {
-    clearTimeout(timeout);
   }
 }
 
