@@ -23,7 +23,7 @@ function sendJson(res, statusCode, payload) {
   res.end(body);
 }
 
-function sendProxyError(res, statusCode, statusText, message, elapsedMs = 0) {
+function sendProxyError(res, statusCode, statusText, message, elapsedMs = 0, errorDetails = []) {
   sendJson(res, statusCode, {
     ok: false,
     status: statusCode,
@@ -31,8 +31,52 @@ function sendProxyError(res, statusCode, statusText, message, elapsedMs = 0) {
     headers: {},
     body: "",
     error: message,
+    errorDetails,
     elapsedMs
   });
+}
+
+function hasHeader(headers, headerName) {
+  return Object.keys(headers).some((key) => key.toLowerCase() === headerName.toLowerCase());
+}
+
+function applyDefaultHeaders(headers) {
+  const defaults = {
+    Accept: "*/*",
+    "User-Agent": "ReqForge/1.0",
+    "Cache-Control": "no-cache"
+  };
+
+  for (const [key, value] of Object.entries(defaults)) {
+    if (!hasHeader(headers, key)) {
+      headers[key] = value;
+    }
+  }
+}
+
+function getErrorDetails(error) {
+  const details = [];
+
+  if (error.name) {
+    details.push(`Error type: ${error.name}`);
+  }
+
+  if (error.code) {
+    details.push(`Error code: ${error.code}`);
+  }
+
+  if (error.cause) {
+    if (error.cause.code) {
+      details.push(`Cause code: ${error.cause.code}`);
+    }
+    if (error.cause.message) {
+      details.push(`Cause message: ${error.cause.message}`);
+    }
+  }
+
+  details.push("ReqForge did not receive an HTTP response from the target API.");
+
+  return details;
 }
 
 function readJsonBody(req) {
@@ -122,6 +166,7 @@ async function proxyRequest(req, res) {
       headers[key] = String(value);
     }
   }
+  applyDefaultHeaders(headers);
 
   const timeoutMs = Math.min(Number(payload.timeoutMs || 30000), 120000);
   const controller = new AbortController();
@@ -158,7 +203,8 @@ async function proxyRequest(req, res) {
       502,
       "Bad Gateway",
       error.name === "AbortError" ? "Request timed out." : error.message,
-      Math.round(performance.now() - startedAt)
+      Math.round(performance.now() - startedAt),
+      getErrorDetails(error)
     );
   } finally {
     clearTimeout(timeout);

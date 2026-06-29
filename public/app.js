@@ -155,6 +155,16 @@ function setPending(isPending) {
   sendButton.textContent = isPending ? "Sending" : "Send";
 }
 
+function formatErrorMessage(message, result = {}) {
+  const details = result.errorDetails || [];
+
+  if (!details.length) {
+    return message;
+  }
+
+  return `${message}\n\nDetails:\n${details.map((detail) => `- ${detail}`).join("\n")}`;
+}
+
 function formatStatus(result) {
   if (!result || !result.status) {
     return "Error";
@@ -175,7 +185,7 @@ function showError(message, result = {}) {
   responseTitle.textContent = "Request error";
   statusCode.textContent = formatStatus(result);
   elapsedTime.textContent = result.elapsedMs !== undefined ? `${result.elapsedMs} ms` : "-- ms";
-  responseBody.textContent = message;
+  responseBody.textContent = formatErrorMessage(message, result);
   responseHeaders.textContent = result.headers ? JSON.stringify(result.headers, null, 2) : "";
   setResponseTab("responseBody");
 }
@@ -268,5 +278,5 @@ bodyType.addEventListener("change", () => {
 });
 
 writeTable("paramsTable", []);
-writeTable("headersTable", [{ key: "Accept", value: "application/json" }]);
+writeTable("headersTable", [{ key: "Accept", value: "*/*" }]);
 syncAuthFields();

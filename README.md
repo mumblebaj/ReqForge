@@ -122,12 +122,22 @@ Use the Headers tab to add custom request headers.
 Example headers:
 
 ```text
-Accept: application/json
+Accept: */*
 Content-Type: application/json
 X-Request-ID: demo-123
 ```
 
 When the body type is `JSON`, ReqForge automatically adds `Content-Type: application/json` if no `Content-Type` header has already been provided.
+
+ReqForge uses Postman-like defaults for outbound requests when you do not provide them yourself:
+
+```text
+Accept: */*
+User-Agent: ReqForge/1.0
+Cache-Control: no-cache
+```
+
+Headers controlled by the HTTP runtime, such as `Host`, `Content-Length`, and `Connection`, are not set manually by ReqForge.
 
 ## Authorization
 
@@ -209,6 +219,8 @@ After a request completes, ReqForge displays:
 - response headers
 
 HTTP error responses from the target API, such as `400 Bad Request` or `401 Unauthorized`, are displayed as normal API responses with their original status code, response body, and response headers. Network or proxy-level failures are shown separately as request errors.
+
+If ReqForge shows `502 Bad Gateway`, the local Node.js proxy failed before receiving a response from the target API. On corporate networks this can be caused by DNS, TLS inspection, VPN routing, or an outbound proxy requirement. ReqForge displays low-level failure details when Node provides them.
 
 If the response body contains JSON, it is automatically formatted for readability.
 
