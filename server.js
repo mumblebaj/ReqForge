@@ -3,6 +3,7 @@ const https = require("https");
 const fs = require("fs");
 const path = require("path");
 const tls = require("tls");
+const pacResolver = require("pac-resolver");
 
 const PORT = Number(process.env.PORT || 3000);
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -171,6 +172,90 @@ function getProxyUrl(targetUrl) {
   }
 }
 
+const pacCache = new Map();
+const PAC_CACHE_TTL_MS = 60 * 60 * 1000;
+
+async function fetchPacScript(pacUrl) {
+  const cached = pacCache.get(pacUrl);
+  if (cached && Date.now() - cached.timestamp < PAC_CACHE_TTL_MS) {
+    return { script: cached.script, cacheHit: true };
+  }
+
+  const parsed = new URL(pacUrl);
+  const transport = parsed.protocol === "https:" ? https : http;
+
+  const script = await new Promise((resolve, reject) => {
+    const req = transport.get(parsed, { timeout: 5000 }, (res) => {
+      if (res.statusCode !== 200) {
+        reject(new Error(`PAC fetch failed with HTTP ${res.statusCode}`));
+        res.resume();
+        return;
+      }
+
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    });
+
+    req.on("timeout", () => req.destroy(new Error("PAC fetch timed out")));
+    req.on("error", reject);
+  });
+
+  if (!script.includes("FindProxyForURL")) {
+    throw new Error("PAC script does not define FindProxyForURL");
+  }
+
+  pacCache.set(pacUrl, { script, timestamp: Date.now() });
+  return { script, cacheHit: false };
+}
+
+function parsePacResult(pacResult) {
+  const normalized = String(pacResult || "").trim();
+  if (!normalized) {
+    throw new Error("PAC resolver returned an empty result");
+  }
+
+  const firstDirective = normalized.split(";")[0].trim();
+  if (firstDirective.toUpperCase() === "DIRECT") {
+    return null;
+  }
+
+  const match = firstDirective.match(/^(PROXY|HTTP|HTTPS)\s+([^\s]+)$/i);
+  if (!match) {
+    throw new Error(`Unsupported PAC directive: ${firstDirective}`);
+  }
+
+  const endpoint = match[2];
+  const [host, port] = endpoint.split(":");
+  if (!host || !port) {
+    throw new Error(`Invalid PAC proxy endpoint: ${endpoint}`);
+  }
+
+  return new URL(`http://${host}:${port}`);
+}
+
+async function resolveProxyFromPac(targetUrl, manualPacUrl) {
+  if (!manualPacUrl) {
+    return null;
+  }
+
+  const { script, cacheHit } = await fetchPacScript(manualPacUrl);
+  const FindProxyForURL = pacResolver(script);
+  const pacResult = await FindProxyForURL(targetUrl.href, targetUrl.hostname);
+  const proxyUrl = parsePacResult(pacResult);
+
+  return {
+    proxyUrl,
+    diagnostics: {
+      source: "manual-pac",
+      pacUrl: manualPacUrl,
+      cache: cacheHit ? "hit" : "miss",
+      result: String(pacResult),
+      mode: proxyUrl ? "proxy" : "direct"
+    }
+  };
+}
+
 function getProxyDescription(proxyUrl) {
   if (!proxyUrl) {
     return "direct connection";
@@ -336,8 +421,48 @@ function requestHttpsThroughProxy(targetUrl, proxyUrl, options, body, timeoutMs)
   });
 }
 
-async function sendHttpRequest(targetUrl, options, body, timeoutMs, redirectCount = 0) {
-  const proxyUrl = getProxyUrl(targetUrl);
+async function sendHttpRequest(targetUrl, options, body, timeoutMs, transportSettings = {}, redirectCount = 0) {
+  const manualPacUrl = String(transportSettings.manualPacUrl || "").trim();
+
+  let proxyUrl = getProxyUrl(targetUrl);
+  let proxySource = proxyUrl ? "environment" : "direct";
+
+  const pacDiagnostics = {
+    configured: Boolean(manualPacUrl),
+    attempted: false,
+    cache: "not-applicable",
+    result: "not-evaluated",
+    mode: "not-evaluated",
+    fallbackReason: "",
+    error: ""
+  };
+
+  if (manualPacUrl) {
+    if (proxyUrl) {
+      pacDiagnostics.fallbackReason = "Manual PAC skipped because environment proxy is already configured.";
+    } else {
+      pacDiagnostics.attempted = true;
+      try {
+        const pacResolution = await resolveProxyFromPac(targetUrl, manualPacUrl);
+        if (pacResolution) {
+          proxyUrl = pacResolution.proxyUrl;
+          proxySource = "manual-pac";
+          pacDiagnostics.cache = pacResolution.diagnostics.cache;
+          pacDiagnostics.result = pacResolution.diagnostics.result;
+          pacDiagnostics.mode = pacResolution.diagnostics.mode;
+          if (!proxyUrl) {
+            pacDiagnostics.fallbackReason = "PAC returned DIRECT for this URL.";
+          }
+        }
+      } catch (error) {
+        pacDiagnostics.error = error.message;
+        pacDiagnostics.fallbackReason = "PAC evaluation failed; falling back to environment or direct connection.";
+
+        proxyUrl = getProxyUrl(targetUrl);
+        proxySource = proxyUrl ? "environment" : "direct";
+      }
+    }
+  }
 
   if (proxyUrl && proxyUrl.protocol !== "http:") {
     const error = new Error("Only HTTP proxy URLs are currently supported.");
@@ -364,10 +489,17 @@ async function sendHttpRequest(targetUrl, options, body, timeoutMs, redirectCoun
       delete redirectOptions.headers["content-length"];
     }
 
-    return sendHttpRequest(redirectUrl, redirectOptions, redirectBody, timeoutMs, redirectCount + 1);
+    return sendHttpRequest(redirectUrl, redirectOptions, redirectBody, timeoutMs, transportSettings, redirectCount + 1);
   }
 
   response.transport = getProxyDescription(proxyUrl);
+  response.diagnostics = {
+    proxy: {
+      source: proxySource,
+      resolved: proxyUrl ? proxyUrl.toString() : "DIRECT"
+    },
+    pac: pacDiagnostics
+  };
   return response;
 }
 
@@ -462,6 +594,7 @@ async function proxyRequest(req, res) {
 
   const timeoutMs = Math.min(Number(payload.timeoutMs || 30000), 120000);
   const startedAt = performance.now();
+  const transportSettings = payload.transport || {};
 
   try {
     const hasBody = payload.body !== undefined && payload.body !== null && String(payload.body).length > 0;
@@ -472,7 +605,7 @@ async function proxyRequest(req, res) {
     const response = await sendHttpRequest(targetUrl, {
       method,
       headers
-    }, body, timeoutMs);
+    }, body, timeoutMs, transportSettings);
 
     sendJson(res, 200, {
       ok: response.ok,
@@ -481,6 +614,7 @@ async function proxyRequest(req, res) {
       headers: response.headers,
       body: response.body,
       transport: response.transport,
+      diagnostics: response.diagnostics,
       elapsedMs: Math.round(performance.now() - startedAt)
     });
   } catch (error) {

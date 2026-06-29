@@ -7,10 +7,12 @@ ReqForge is a lightweight JavaScript API request builder for sending HTTP reques
 - Send `GET`, `POST`, `PUT`, `PATCH`, and `DELETE` requests.
 - Add query parameters to the request URL.
 - Add custom request headers.
+- Save and reuse header presets from the Headers tab.
 - Add request authorization using Postman-style options.
+- Configure request transport with Proxy modes (`Auto`, `Environment`, `Manual`, `Direct`).
 - Send JSON or raw text payloads for supported methods.
 - Format JSON payloads before sending.
-- View response status, elapsed time, response body, and response headers.
+- View response status, elapsed time, response body, response headers, and proxy diagnostics.
 - Uses a local Node.js proxy endpoint to avoid browser CORS limitations when calling APIs.
 
 ## Requirements
@@ -149,6 +151,47 @@ Cache-Control: no-cache
 
 Headers controlled by the HTTP runtime, such as `Host`, `Content-Length`, and `Connection`, are not set manually by ReqForge.
 
+The Headers tab includes preset actions:
+
+- Save current headers as a named preset
+- Load a saved preset
+- Delete a saved preset
+
+Preset data is stored in browser local storage.
+
+Header values also support simple local substitutions with `{{name}}` placeholders. Placeholder values are read from local storage keys prefixed with `reqforge.var.`.
+
+Example:
+
+```text
+X-Tenant-ID: {{tenantId}}
+```
+
+resolves from:
+
+```text
+localStorage key: reqforge.var.tenantId
+```
+
+### Proxy
+
+Use the Proxy tab to control per-request transport behavior:
+
+- `Auto (System then env)`: tries OS proxy detection first, then environment variables
+- `Environment only`: uses `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY`
+- `Manual override`: specify protocol, host, port, auth settings, and bypass rules
+- `Direct only`: bypasses all proxy sources
+
+You can optionally provide a **Manual PAC URL** in the Proxy tab. When set, ReqForge evaluates that PAC script first and uses its `FindProxyForURL` result before falling back to environment proxy settings.
+
+Bypass rules accept comma-separated hosts or domains.
+
+Manual proxy auth supports these request-side values:
+
+- `None`
+- `Basic` (username and password)
+- `Digest`, `NTLM`, and `Kerberos/Negotiate` token fields (forwarded as header token format)
+
 ## Authorization
 
 ReqForge includes authorization options similar to common Postman workflows.
@@ -227,6 +270,7 @@ After a request completes, ReqForge displays:
 - elapsed request time in milliseconds
 - response body
 - response headers
+- diagnostics (proxy source, resolution steps, PAC/WPAD detection, auth method, and TLS details)
 
 HTTP error responses from the target API, such as `400 Bad Request` or `401 Unauthorized`, are displayed as normal API responses with their original status code, response body, and response headers. Network or proxy-level failures are shown separately as request errors.
 
@@ -252,7 +296,20 @@ The proxy accepts JSON in this shape:
     "Accept": "application/json",
     "Content-Type": "application/json"
   },
-  "body": "{ \"name\": \"Ada\" }"
+  "body": "{ \"name\": \"Ada\" }",
+  "transport": {
+    "mode": "auto",
+    "manualPacUrl": "http://proxy.example.com/wpad.dat",
+    "bypass": ["localhost", ".internal.example.com"],
+    "manualProxy": {
+      "protocol": "http",
+      "host": "proxy.example.com",
+      "port": 8080,
+      "authType": "basic",
+      "username": "user",
+      "password": "pass"
+    }
+  }
 }
 ```
 
@@ -265,6 +322,11 @@ The proxy returns:
   "statusText": "OK",
   "headers": {},
   "body": "{}",
+  "transport": "http://proxy.example.com:8080",
+  "diagnostics": {
+    "source": "system-winhttp",
+    "resolvedProxyForUrl": "http://proxy.example.com:8080"
+  },
   "elapsedMs": 120
 }
 ```
@@ -293,6 +355,11 @@ ReqForge currently supports HTTP proxy URLs, including HTTPS targets through an 
 HTTP_PROXY=http://proxy.example.com:8080
 HTTPS_PROXY=http://proxy.example.com:8080
 ```
+
+Current limitations:
+
+- SOCKS proxy protocols are detectable/configurable but not yet executed by the runtime.
+- WPAD auto-discovery is not implemented. Use OS proxy settings or the Manual PAC URL field.
 
 Proxy credentials can be included in the proxy URL when your environment requires them:
 

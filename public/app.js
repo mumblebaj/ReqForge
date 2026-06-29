@@ -1,3 +1,5 @@
+const HEADER_PRESETS_KEY = "reqforge.headerPresets.v1";
+
 const state = {
   activeTab: "params",
   activeResponseTab: "responseBody"
@@ -11,9 +13,12 @@ const statusCode = document.querySelector("#statusCode");
 const elapsedTime = document.querySelector("#elapsedTime");
 const responseBody = document.querySelector("#responseBody");
 const responseHeaders = document.querySelector("#responseHeaders");
+const responseDiagnostics = document.querySelector("#responseDiagnostics");
 const authType = document.querySelector("#authType");
 const bodyType = document.querySelector("#bodyType");
 const bodyEditor = document.querySelector("#bodyEditor");
+const proxyMode = document.querySelector("#proxyMode");
+const manualProxyFields = document.querySelector("#manualProxyFields");
 
 function addRow(tableId, key = "", value = "") {
   const table = document.querySelector(`#${tableId}`);
@@ -70,6 +75,78 @@ function syncAuthFields() {
   });
 }
 
+function syncProxyFields() {
+  manualProxyFields.classList.toggle("active", proxyMode.value === "manual");
+}
+
+function getHeaderPresets() {
+  try {
+    const raw = localStorage.getItem(HEADER_PRESETS_KEY);
+    return raw ? JSON.parse(raw) : {};
+  } catch {
+    return {};
+  }
+}
+
+function setHeaderPresets(presets) {
+  localStorage.setItem(HEADER_PRESETS_KEY, JSON.stringify(presets));
+}
+
+function refreshHeaderPresetSelect() {
+  const select = document.querySelector("#headerPresetSelect");
+  const presets = getHeaderPresets();
+  const names = Object.keys(presets).sort((a, b) => a.localeCompare(b));
+  select.innerHTML = "";
+
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = names.length ? "Select a preset" : "No presets yet";
+  select.append(placeholder);
+
+  names.forEach((name) => {
+    const option = document.createElement("option");
+    option.value = name;
+    option.textContent = name;
+    select.append(option);
+  });
+}
+
+function saveHeaderPreset() {
+  const presetName = document.querySelector("#headerPresetName").value.trim();
+  if (!presetName) {
+    showError("Enter a preset name before saving.");
+    return;
+  }
+
+  const presets = getHeaderPresets();
+  presets[presetName] = readTable("headersTable");
+  setHeaderPresets(presets);
+  refreshHeaderPresetSelect();
+  document.querySelector("#headerPresetSelect").value = presetName;
+}
+
+function loadHeaderPreset() {
+  const selected = document.querySelector("#headerPresetSelect").value;
+  if (!selected) {
+    return;
+  }
+
+  const presets = getHeaderPresets();
+  writeTable("headersTable", presets[selected] || []);
+}
+
+function deleteHeaderPreset() {
+  const selected = document.querySelector("#headerPresetSelect").value;
+  if (!selected) {
+    return;
+  }
+
+  const presets = getHeaderPresets();
+  delete presets[selected];
+  setHeaderPresets(presets);
+  refreshHeaderPresetSelect();
+}
+
 function applyAuth(headers, url) {
   switch (authType.value) {
     case "bearer":
@@ -106,6 +183,54 @@ function applyAuth(headers, url) {
   }
 }
 
+function resolveHeaderVariables(headers) {
+  // Allow reusing values from local storage via {{name}} placeholders.
+  const variableStore = {};
+  for (const [key, value] of Object.entries(localStorage)) {
+    if (key.startsWith("reqforge.var.")) {
+      variableStore[key.slice("reqforge.var.".length)] = value;
+    }
+  }
+
+  const resolved = {};
+  for (const [headerName, headerValue] of Object.entries(headers)) {
+    resolved[headerName] = String(headerValue).replace(/\{\{([a-zA-Z0-9_.-]+)\}\}/g, (_, token) => {
+      return variableStore[token] || "";
+    });
+  }
+
+  return resolved;
+}
+
+function buildTransportSettings() {
+  const mode = proxyMode.value;
+  const bypassRaw = document.querySelector("#proxyBypassRules").value;
+  const bypass = bypassRaw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+  const manualPacUrl = document.querySelector("#manualPacUrl").value.trim();
+
+  const manualProxy = {
+    protocol: document.querySelector("#manualProxyProtocol").value,
+    host: document.querySelector("#manualProxyHost").value.trim(),
+    port: Number(document.querySelector("#manualProxyPort").value || 0),
+    authType: document.querySelector("#manualProxyAuthType").value,
+    username: document.querySelector("#manualProxyUsername").value,
+    password: document.querySelector("#manualProxyPassword").value,
+    authToken: document.querySelector("#manualProxyAuthToken").value
+  };
+
+  return {
+    mode,
+    bypass,
+    manualProxy,
+    manualPacUrl,
+    diagnostics: true
+  };
+}
+
 function buildRequestPayload() {
   const method = document.querySelector("#method").value;
   const url = new URL(document.querySelector("#url").value);
@@ -120,21 +245,23 @@ function buildRequestPayload() {
   });
 
   applyAuth(headers, url);
+  const resolvedHeaders = resolveHeaderVariables(headers);
 
   let body;
   if (bodyType.value !== "none" && !["GET"].includes(method)) {
     body = bodyEditor.value;
     if (bodyType.value === "json" && body.trim()) {
       JSON.parse(body);
-      headers["Content-Type"] = headers["Content-Type"] || "application/json";
+      resolvedHeaders["Content-Type"] = resolvedHeaders["Content-Type"] || "application/json";
     }
   }
 
   return {
     method,
     url: url.toString(),
-    headers,
-    body
+    headers: resolvedHeaders,
+    body,
+    transport: buildTransportSettings()
   };
 }
 
@@ -173,12 +300,21 @@ function formatStatus(result) {
   return [result.status, result.statusText].filter(Boolean).join(" ");
 }
 
+function formatDiagnostics(diagnostics) {
+  if (!diagnostics) {
+    return "No diagnostics returned.";
+  }
+
+  return JSON.stringify(diagnostics, null, 2);
+}
+
 function renderResponseResult(result) {
   responseTitle.textContent = result.ok ? "Completed" : `HTTP ${formatStatus(result)}`;
   statusCode.textContent = formatStatus(result);
   elapsedTime.textContent = `${result.elapsedMs || 0} ms`;
   responseBody.textContent = prettifyBody(result.body);
   responseHeaders.textContent = JSON.stringify(result.headers || {}, null, 2);
+  responseDiagnostics.textContent = formatDiagnostics(result.diagnostics);
 }
 
 function showError(message, result = {}) {
@@ -187,6 +323,7 @@ function showError(message, result = {}) {
   elapsedTime.textContent = result.elapsedMs !== undefined ? `${result.elapsedMs} ms` : "-- ms";
   responseBody.textContent = formatErrorMessage(message, result);
   responseHeaders.textContent = result.headers ? JSON.stringify(result.headers, null, 2) : "";
+  responseDiagnostics.textContent = formatDiagnostics(result.diagnostics);
   setResponseTab("responseBody");
 }
 
@@ -198,6 +335,7 @@ async function sendRequest(event) {
   elapsedTime.textContent = "-- ms";
   responseBody.textContent = "";
   responseHeaders.textContent = "";
+  responseDiagnostics.textContent = "";
 
   let requestPayload;
   try {
@@ -240,11 +378,25 @@ function clearRequest() {
   syncAuthFields();
   bodyType.value = "json";
   bodyEditor.value = "";
+
+  proxyMode.value = "auto";
+  syncProxyFields();
+  document.querySelector("#manualProxyProtocol").value = "http";
+  document.querySelector("#manualProxyHost").value = "";
+  document.querySelector("#manualProxyPort").value = "";
+  document.querySelector("#manualProxyAuthType").value = "none";
+  document.querySelector("#manualProxyUsername").value = "";
+  document.querySelector("#manualProxyPassword").value = "";
+  document.querySelector("#manualProxyAuthToken").value = "";
+  document.querySelector("#manualPacUrl").value = "";
+  document.querySelector("#proxyBypassRules").value = "";
+
   responseTitle.textContent = "Not sent";
   statusCode.textContent = "--";
   elapsedTime.textContent = "-- ms";
   responseBody.textContent = "";
   responseHeaders.textContent = "";
+  responseDiagnostics.textContent = "";
 }
 
 document.querySelectorAll("[data-tab]").forEach((tab) => {
@@ -260,8 +412,13 @@ document.querySelectorAll("[data-add-row]").forEach((button) => {
 });
 
 authType.addEventListener("change", syncAuthFields);
+proxyMode.addEventListener("change", syncProxyFields);
 requestForm.addEventListener("submit", sendRequest);
 document.querySelector("#clearButton").addEventListener("click", clearRequest);
+
+document.querySelector("#saveHeaderPresetButton").addEventListener("click", saveHeaderPreset);
+document.querySelector("#loadHeaderPresetButton").addEventListener("click", loadHeaderPreset);
+document.querySelector("#deleteHeaderPresetButton").addEventListener("click", deleteHeaderPreset);
 
 document.querySelector("#formatJsonButton").addEventListener("click", () => {
   try {
@@ -279,4 +436,6 @@ bodyType.addEventListener("change", () => {
 
 writeTable("paramsTable", []);
 writeTable("headersTable", [{ key: "Accept", value: "*/*" }]);
+refreshHeaderPresetSelect();
 syncAuthFields();
+syncProxyFields();

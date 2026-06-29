@@ -38,6 +38,7 @@
             <button class="tab active" data-tab="params" type="button">Params</button>
             <button class="tab" data-tab="headers" type="button">Headers</button>
             <button class="tab" data-tab="auth" type="button">Authorization</button>
+            <button class="tab" data-tab="proxy" type="button">Proxy</button>
             <button class="tab" data-tab="body" type="button">Body</button>
           </nav>
 
@@ -54,7 +55,90 @@
               <h2>Headers</h2>
               <button class="icon-button" data-add-row="headersTable" type="button" title="Add header">+</button>
             </div>
+            <div class="preset-row" aria-label="Header presets">
+              <label>
+                Preset Name
+                <input id="headerPresetName" type="text" placeholder="corp-defaults">
+              </label>
+              <button class="ghost-button" id="saveHeaderPresetButton" type="button">Save Preset</button>
+            </div>
+            <div class="preset-row" aria-label="Load header preset">
+              <label>
+                Saved Presets
+                <select id="headerPresetSelect"></select>
+              </label>
+              <button class="ghost-button" id="loadHeaderPresetButton" type="button">Load</button>
+              <button class="ghost-button" id="deleteHeaderPresetButton" type="button">Delete</button>
+            </div>
             <div class="key-value-table" id="headersTable"></div>
+          </section>
+
+          <section class="tab-panel" id="proxyPanel">
+            <div class="proxy-grid">
+              <label>
+                Proxy Mode
+                <select id="proxyMode">
+                  <option value="auto">Auto (System then env)</option>
+                  <option value="env">Environment only</option>
+                  <option value="manual">Manual override</option>
+                  <option value="direct">Direct only</option>
+                </select>
+              </label>
+
+              <label>
+                Manual PAC URL <span class="muted">(optional)</span>
+                <input id="manualPacUrl" type="url" placeholder="http://proxy.example.com/wpad.dat">
+              </label>
+              <p class="muted">If provided, will be evaluated before other proxy settings.</p>
+
+              <div class="proxy-fields" id="manualProxyFields">
+                <label>
+                  Proxy Protocol
+                  <select id="manualProxyProtocol">
+                    <option value="http">HTTP</option>
+                    <option value="https">HTTPS</option>
+                    <option value="socks5">SOCKS5</option>
+                    <option value="socks4">SOCKS4</option>
+                  </select>
+                </label>
+                <label>
+                  Proxy Host
+                  <input id="manualProxyHost" type="text" placeholder="proxy.example.com">
+                </label>
+                <label>
+                  Proxy Port
+                  <input id="manualProxyPort" type="number" min="1" max="65535" placeholder="8080">
+                </label>
+                <label>
+                  Proxy Auth
+                  <select id="manualProxyAuthType">
+                    <option value="none">None</option>
+                    <option value="basic">Basic</option>
+                    <option value="digest">Digest</option>
+                    <option value="ntlm">NTLM</option>
+                    <option value="negotiate">Kerberos/Negotiate</option>
+                  </select>
+                </label>
+                <label>
+                  Proxy Username
+                  <input id="manualProxyUsername" type="text" autocomplete="off" placeholder="username">
+                </label>
+                <label>
+                  Proxy Password
+                  <input id="manualProxyPassword" type="password" autocomplete="off" placeholder="password">
+                </label>
+                <label>
+                  Proxy Auth Token
+                  <input id="manualProxyAuthToken" type="password" autocomplete="off" placeholder="For Digest/NTLM/Negotiate token flows">
+                </label>
+              </div>
+
+              <label>
+                Bypass Rules
+                <input id="proxyBypassRules" type="text" placeholder="localhost,.corp.internal,127.0.0.1">
+              </label>
+              <p class="muted">Diagnostics include source, resolution steps, PAC/WPAD detection, auth method, and TLS details.</p>
+            </div>
           </section>
 
           <section class="tab-panel" id="authPanel">
@@ -145,10 +229,12 @@
         <nav class="tabs response-tabs" aria-label="Response views">
           <button class="tab active" data-response-tab="responseBody" type="button">Body</button>
           <button class="tab" data-response-tab="responseHeaders" type="button">Headers</button>
+          <button class="tab" data-response-tab="responseDiagnostics" type="button">Diagnostics</button>
         </nav>
 
         <pre class="response-output active" id="responseBody"></pre>
         <pre class="response-output" id="responseHeaders"></pre>
+        <pre class="response-output" id="responseDiagnostics"></pre>
       </aside>
     </main>
 

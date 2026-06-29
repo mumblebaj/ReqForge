@@ -209,6 +209,18 @@ textarea:focus {
   margin-top: 14px;
 }
 
+.preset-row {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: end;
+}
+
+.preset-row .ghost-button {
+  min-height: 44px;
+}
+
 .key-value-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 34px;
@@ -219,6 +231,22 @@ textarea:focus {
   display: grid;
   gap: 16px;
   max-width: 720px;
+}
+
+.proxy-grid {
+  display: grid;
+  gap: 16px;
+  max-width: 760px;
+}
+
+.proxy-fields {
+  display: none;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.proxy-fields.active {
+  display: grid;
 }
 
 label {
@@ -346,7 +374,9 @@ label {
 
   .request-line,
   .key-value-row,
-  .auth-fields {
+  .auth-fields,
+  .proxy-fields,
+  .preset-row {
     grid-template-columns: 1fr;
   }
 
