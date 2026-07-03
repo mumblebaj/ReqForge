@@ -19,6 +19,6 @@
     "node": ">=18"
   },
   "dependencies": {
-    "pac-resolver": "^9.0.1"
+    "pac-resolver": "^7.0.1"
   }
 }
